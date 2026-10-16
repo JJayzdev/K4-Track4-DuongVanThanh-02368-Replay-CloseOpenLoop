@@ -7,41 +7,56 @@ from . import config as C
 
 def ttc(gap, closing):
     """Time to collision [s] = gap / closing speed (inf when the gap is not closing)."""
-    # TODO (Bước 2): hãy tự cài hàm này. Gợi ý:
-    #   TTC = gap / closing khi closing > 0, ngược lại inf. Phải chạy được trên mảng numpy (dùng np.where,
-    #   tránh chia cho 0).
-    raise NotImplementedError("TODO ttc: xem GUIDE.md, Bước 2")
+    gap = np.asarray(gap, dtype=float)
+    closing = np.asarray(closing, dtype=float)
+    is_scalar = (gap.ndim == 0 and closing.ndim == 0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        res = np.where(closing > 0, gap / closing, np.inf)
+    return float(res) if is_scalar else res
 
 
 def required_decel(gap, closing):
     """Deceleration [m/s^2] needed to remove the closing speed exactly at contact: closing^2 / (2 gap)."""
-    # TODO (Bước 2): hãy tự cài hàm này. Gợi ý:
-    #   closing^2 / (2 * gap) khi closing > 0, ngược lại 0. Ví dụ của slide: gap 12 m, closing 5 m/s -> 1,04
-    #   m/s^2.
-    raise NotImplementedError("TODO required_decel: xem GUIDE.md, Bước 2")
+    gap = np.asarray(gap, dtype=float)
+    closing = np.asarray(closing, dtype=float)
+    is_scalar = (gap.ndim == 0 and closing.ndim == 0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        res = np.where(closing > 0, (closing ** 2) / (2.0 * gap), 0.0)
+    return float(res) if is_scalar else res
 
 
 def unavoidable(gaps, dvs, t_react=0.0, b_max=C.B_MAX):
     """Boolean grid (len(dvs), len(gaps)): True where NO planner can avoid contact, even braking at b_max after the
     reaction delay: gap < dv * t_react + dv^2 / (2 b_max)  (lead keeps its speed)."""
-    # TODO (Bước 2): hãy tự cài hàm này. Gợi ý:
-    #   Hãy tự suy ra biên. Trong t_react xe vẫn giữ tốc độ nên khoảng cách co lại dv * t_react. Sau đó
-    #   phanh b_max cần dv^2 / (2 * b_max) để triệt tiêu tốc độ tiến gần. Bất khả thi khi gap nhỏ hơn tổng
-    #   hai đoạn đó. Dùng np.meshgrid(gaps, dvs) để kết quả có shape (len(dvs), len(gaps)). Với dv = 0 phải
-    #   luôn tránh được.
-    raise NotImplementedError("TODO unavoidable: xem GUIDE.md, Bước 2")
+    G, DV = np.meshgrid(gaps, dvs)
+    stopping_dist = np.where(DV > 0, DV * t_react + (DV ** 2) / (2.0 * b_max), 0.0)
+    return (G < stopping_dist) & (DV > 0)
 
 
 def mine_braking(logs, threshold=C.BRAKE_THRESHOLD, min_steps=5):
     """Find trajectories where the lead brakes: smoothed deceleration below `threshold` for at least `min_steps`
     consecutive steps (0.5 s). Returns a list of event dicts (one per trajectory, first event only)."""
-    # TODO (Bước 2): hãy tự cài hàm này. Gợi ý:
-    #   Với mỗi quỹ đạo i: a = logs.a_lead[i, :logs.n[i]] (đã làm mượt; KHÔNG dùng acc_lead_raw). Tìm lần
-    #   ĐẦU TIÊN có đủ min_steps bước liên tiếp a < threshold. onset_step = bước bắt đầu chuỗi đó. Mỗi quỹ
-    #   đạo tối đa 1 sự kiện. Trả list dict có đúng các khoá: traj, onset_step, peak_decel (a nhỏ nhất trong
-    #   chuỗi), gap_m (logs.gap[i, onset]), closing_m_s (logs.v_ego[i, onset] - logs.v_lead_s[i, onset]),
-    #   ego_speed (logs.v_ego[i, onset]).
-    raise NotImplementedError("TODO mine_braking: xem GUIDE.md, Bước 2")
+    events = []
+    for i in range(len(logs)):
+        n_steps = logs.n[i]
+        a = logs.a_lead[i, :n_steps]
+        for t in range(len(a) - min_steps + 1):
+            if np.all(a[t:t + min_steps] < threshold):
+                onset_step = t
+                end = t + min_steps
+                while end < len(a) and a[end] < threshold:
+                    end += 1
+                peak_decel = float(np.min(a[t:end]))
+                events.append({
+                    "traj": int(i),
+                    "onset_step": int(onset_step),
+                    "peak_decel": float(peak_decel),
+                    "gap_m": float(logs.gap[i, onset_step]),
+                    "closing_m_s": float(logs.v_ego[i, onset_step] - logs.v_lead_s[i, onset_step]),
+                    "ego_speed": float(logs.v_ego[i, onset_step]),
+                })
+                break
+    return events
 
 
 def human_brake_limit(logs, q=0.1):
